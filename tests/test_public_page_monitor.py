@@ -478,5 +478,13 @@ class ConfigurationTests(NoNetworkTest):
         self.assertEqual(m.OPENS_AT, OPEN)
 
 
+
+class NotificationDeliveryFixture(NoNetworkTest):
+    """通知到達の確認用。試験専用の下書きにだけ置き、取り込まない。"""
+
+    def test_planned_failure_for_notification_delivery(self):
+        self.fail("【試験通知】異常通知メールの到達確認用です。相談会アプリの障害ではありません。")
+
+
 if __name__ == "__main__":
     unittest.main()
