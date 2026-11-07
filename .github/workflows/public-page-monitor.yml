@@ -1,0 +1,81 @@
+name: 公開ページの補助監視
+
+on:
+  pull_request:
+    paths:
+      - 'tools/public_page_monitor*'
+      - 'tests/test_public_page_monitor.py'
+      - '.github/workflows/public-page-monitor.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/public_page_monitor*'
+      - 'tests/test_public_page_monitor.py'
+      - '.github/workflows/public-page-monitor.yml'
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: public-page-monitor-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  offline-tests:
+    name: 架空の応答による試験
+    if: github.repository == 'minotake-tas/minotake-soudan' && (github.event_name == 'pull_request' || github.event_name == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: 公開コードだけを取得する
+        env:
+          MONITOR_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$MONITOR_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet source
+          git -C source remote add origin https://github.com/minotake-tas/minotake-soudan.git
+          git -C source -c credential.helper= fetch --quiet --depth=1 origin "$MONITOR_REVISION"
+          git -C source -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+      - name: 公開ページへ通信しない試験
+        working-directory: source
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s tests -p 'test_public_page_monitor.py' -v
+
+  public-check:
+    name: 公開２ページを確認する
+    if: github.repository == 'minotake-tas/minotake-soudan' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: 終了日時を先に確認する
+        id: deadline
+        run: |
+          python3 - <<'PY'
+          from datetime import datetime, timezone
+          import os
+          active = datetime.now(timezone.utc) < datetime.fromisoformat('2026-11-19T15:00:00+00:00')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('active=' + str(active).lower() + '\n')
+          print('終了日時前です。設定を確認します。' if active else '終了日時のため、コード取得と公開ページへの通信を中止します。')
+          PY
+      - name: 公開コードだけを取得する
+        if: steps.deadline.outputs.active == 'true'
+        env:
+          MONITOR_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$MONITOR_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet source
+          git -C source remote add origin https://github.com/minotake-tas/minotake-soudan.git
+          git -C source -c credential.helper= fetch --quiet --depth=1 origin "$MONITOR_REVISION"
+          git -C source -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+      - name: 停止設定を確認してから実行する
+        if: steps.deadline.outputs.active == 'true'
+        working-directory: source
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tools/public_page_monitor.py
