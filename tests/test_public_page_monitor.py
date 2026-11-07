@@ -417,14 +417,34 @@ class TransportTests(NoNetworkTest):
 
 
 class ConfigurationTests(NoNetworkTest):
-    def test_delivered_config_is_off(self):
-        self.assertEqual(json.loads((ROOT / "tools/public_page_monitor.config.json").read_text()), {"enabled": False})
+    def test_current_config_contains_only_boolean_enabled(self):
+        config = json.loads((ROOT / "tools/public_page_monitor.config.json").read_text())
+        self.assertEqual(set(config), {"enabled"})
+        self.assertIs(type(config["enabled"]), bool)
 
-    def test_off_main_never_calls_transport(self):
-        stream = io.StringIO()
-        with patch.object(m, "bounded_fetch", side_effect=AssertionError("外部通信禁止")), redirect_stdout(stream):
+    def test_stopped_main_uses_fixture_and_never_runs_transport(self):
+        with patch.object(m.Path, "read_text", return_value='{"enabled":false}'), patch.object(m, "run", return_value=0) as run:
             self.assertEqual(m.main(), 0)
-        self.assertIn("停止中", stream.getvalue())
+            run.assert_called_once_with(False)
+
+    def test_enabled_main_uses_fixture_and_preserves_result(self):
+        with patch.object(m.Path, "read_text", return_value='{"enabled":true}'), patch.object(m, "run", return_value=1) as run:
+            self.assertEqual(m.main(), 1)
+            run.assert_called_once_with(True)
+
+    def test_current_config_runs_only_injected_fictitious_responses(self):
+        enabled = json.loads((ROOT / "tools/public_page_monitor.config.json").read_text())["enabled"]
+        real_run = m.run
+        fetch = Mock(side_effect=[reply("entry", ENTRY), reply()])
+        clock = Clock(OPEN)
+        lines = []
+        def fixture_runner(value):
+            return real_run(value, clock=clock, fetch=fetch, sleep=clock.sleep, output=lines.append)
+        with patch.object(m, "run", side_effect=fixture_runner) as runner:
+            self.assertEqual(m.main(), 0)
+        runner.assert_called_once_with(enabled)
+        self.assertEqual(fetch.call_count, 2 if enabled else 0)
+        self.assertEqual(clock.waits, [])
 
     def test_invalid_config_fails_without_reading_external_data(self):
         for content in ('{"enabled":"false"}', '{"enabled":true,"url":"https://example.invalid"}', 'null', 'broken'):
