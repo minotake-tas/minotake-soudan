@@ -1,5 +1,7 @@
 """架空の応答だけで確認する。外部通信・予約・メール・鍵は使わない。"""
 
+import base64
+import hashlib
 import io
 import json
 import multiprocessing
@@ -10,6 +12,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
@@ -61,7 +64,37 @@ class NoNetworkTest(unittest.TestCase):
         self.addCleanup(self.network.stop)
 
 
+class MetaTags(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.values = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "meta":
+            self.values.append(dict(attrs))
+
+
 class PageTests(NoNetworkTest):
+    def test_published_entry_browser_policy(self):
+        source = (ROOT / "index.html").read_text(encoding="utf-8")
+        before_style, remainder = source.split("<style>", 1)
+        css, _ = remainder.split("</style>", 1)
+        digest = base64.b64encode(hashlib.sha256(css.encode("utf-8")).digest()).decode("ascii")
+        meta = MetaTags()
+        meta.feed(before_style)
+        meta.close()
+        policies = [m["content"] for m in meta.values if m.get("http-equiv", "").lower() == "content-security-policy"]
+        self.assertEqual(len(policies), 1)
+        directives = [item.split() for item in policies[0].split(";") if item.strip()]
+        self.assertCountEqual(directives, [
+            ["default-src", "'none'"],
+            ["base-uri", "'none'"],
+            ["form-action", "'none'"],
+            ["img-src", "data:"],
+            ["style-src", f"'sha256-{digest}'"],
+        ])
+        self.assertIn({"name": "referrer", "content": "no-referrer"}, meta.values)
+
     def test_published_entry_after_event(self):
         page = m.Page()
         page.feed((ROOT / "index.html").read_text(encoding="utf-8"))
@@ -71,7 +104,7 @@ class PageTests(NoNetworkTest):
         self.assertIn("あなたの地区にも伺います。", text)
         self.assertIn("開催は無料です。", text)
         self.assertIn("平日 9:00〜18:00", text)
-        self.assertEqual([url for url, _ in page.links], ["tel:0120540820"])
+        self.assertEqual(page.links, [("tel:0120540820", "0120-540-820")])
         self.assertEqual(page.form_count, 0)
 
     def test_entry_before_opening(self):

@@ -3,12 +3,14 @@ name: 公開ページの補助監視
 on:
   pull_request:
     paths:
+      - 'index.html'
       - 'tools/public_page_monitor*'
       - 'tests/test_public_page_monitor.py'
       - '.github/workflows/public-page-monitor.yml'
   push:
     branches: [main]
     paths:
+      - 'index.html'
       - 'tools/public_page_monitor*'
       - 'tests/test_public_page_monitor.py'
       - '.github/workflows/public-page-monitor.yml'
