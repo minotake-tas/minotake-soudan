@@ -22,7 +22,12 @@ import public_page_monitor as m
 BEFORE = datetime(2026, 11, 8, 23, 59, 59, tzinfo=timezone.utc)
 OPEN = datetime(2026, 11, 9, 0, 0, tzinfo=timezone.utc)
 END = datetime(2026, 11, 19, 15, 0, tzinfo=timezone.utc)
-ENTRY = (ROOT / "index.html").read_text(encoding="utf-8")
+# 受付期間中の表示を検証する固定の試料。公開中の終了案内と独立させる。
+ENTRY = (
+    '<h1>くらしのまるごと相談会</h1><p>11月19日（木） 四街道店・臼井駅前店</p>'
+    '<p>11月9日（月）午前9時から受付開始</p>'
+    f'<a class="registration-link" href="{m.REGISTRATION_URL}">事前のお申し込みへ</a>'
+)
 HERO = '<h1>相談会の事前登録</h1><div><strong>くらしのまるごと相談会</strong><p>11月19日（木）</p><p>午前の部：みそら薬局 四街道店　午後の部：みそら薬局 臼井駅前店</p></div>'
 PENDING = HERO + '<section><strong>11月9日（月）午前9時から受付開始</strong><p>開始日時になりましたら、このページからお申し込みいただけます。</p></section>'
 FORM = '<form><fieldset><legend>相談したい専門職と時間を選んでください</legend><select name="specialist_slots"><option>時間を選ばずに申し込む</option></select></fieldset><label>ふりがな<input name="c_kana" value=""></label><label>お電話<input name="c_phone" value=""></label><button type="submit"><span>選んだ内容で申し込む</span></button></form>'
@@ -57,10 +62,22 @@ class NoNetworkTest(unittest.TestCase):
 
 
 class PageTests(NoNetworkTest):
-    def test_real_entry_before_opening(self):
+    def test_published_entry_after_event(self):
+        page = m.Page()
+        page.feed((ROOT / "index.html").read_text(encoding="utf-8"))
+        page.close()
+        text = "".join(page.text)
+        self.assertIn("11月19日の相談会は終了しました。", text)
+        self.assertIn("あなたの地区にも伺います。", text)
+        self.assertIn("開催は無料です。", text)
+        self.assertIn("平日 9:00〜18:00", text)
+        self.assertEqual([url for url, _ in page.links], ["tel:0120540820"])
+        self.assertEqual(page.form_count, 0)
+
+    def test_entry_before_opening(self):
         self.assertEqual(m.check_page("entry", reply("entry", ENTRY), BEFORE).code, m.Code.OK)
 
-    def test_real_entry_after_opening(self):
+    def test_entry_after_opening(self):
         self.assertEqual(m.check_page("entry", reply("entry", ENTRY), OPEN).code, m.Code.OK)
 
     def test_before_opening_accepts_announcement(self):
